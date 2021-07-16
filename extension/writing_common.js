@@ -9,16 +9,37 @@ function treeget(tree, key) {
 
       If not found, return `none`
       */
-    let keylist = key.split(".");
-    let subtree = tree;
-    for(var i=0; i<keylist.length; i++) {
-	if(keylist[i] in subtree) {
-	    subtree = subtree[keylist[i]];
-	} else {
-	    return null;
-	}
-    }
-    return subtree;
+       let keylist = key.split(".");
+       let subtree = tree;
+       for(var i=0; i<keylist.length; i++) {
+            if (subtree == null) {
+                return null;
+            }
+	    if (keylist[i] in subtree) {
+	        subtree = subtree[keylist[i]];
+	    } else {
+                if (keylist[i] && keylist[i].indexOf('[')>0) {
+                    item = keylist[i].split('[')[0];
+                    idx = keylist[i].split('[')[1];
+                    idx = idx.split(']')[0];
+                    if (item in subtree) {
+                        if (subtree[item][idx]!==undefined) {
+                            subtree =subtree[item][idx];                       
+                        }
+                        else {
+                            return null;
+                        }
+                    }
+                    else {
+                        return null;
+                    }
+                } else {
+                    return null;
+                }
+	    }
+       }
+       return subtree;
+
 }
 
 

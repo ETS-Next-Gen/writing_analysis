@@ -198,17 +198,16 @@ loggers_enabled = [
 */
 loggers_enabled = [
     console_logger(),
-    //ajax_logger("https://writing.hopto.org/webapi/")//,
-    websocket_logger("wss://writing.hopto.org/wsapi/in/")
+    //ajax_logger("https://pddeane.com/webapi/")//,
+    websocket_logger("wss://pddeane.com/wsapi/in/")
 ];
 
 function log_event(event_type, event) {
     /*
-       Eventually, this will send an event to the server. For now, we
-       either ignore it, or print it on our console.
+       This sends an event to the server.
     */
     event = add_event_metadata(event_type, event);
-    // TODO: Add username
+    
     if(event['wa-source'] = null) {
 	event['wa-source'] = 'background-page';
     }
@@ -263,7 +262,7 @@ var WRITINGJS_AJAX_SERVER = null;
 chrome.storage.sync.get(['process-server'], function(result) {
     //WRITINGJS_AJAX_SERVER = result['process-server'];
     if(!WRITINGJS_AJAX_SERVER) {
-	WRITINGJS_AJAX_SERVER = "https://writing.hopto.org/webapi/";
+	WRITINGJS_AJAX_SERVER = "https://pddean.com/webapi/";
     }
     dequeue_events();
 });*/

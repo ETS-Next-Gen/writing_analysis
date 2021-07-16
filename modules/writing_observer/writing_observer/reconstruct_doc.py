@@ -233,6 +233,10 @@ def null(doc, **kwargs):
 # TODO: `ae,``ue,` `de,` and `te` need to be
 # reverse-engineered. These happens if we e.g. make a new bullet
 # list, or add an image.
+
+# TODO: 'iss' and 'dss' are generated when suggested text is inserted or deleted.
+# these can't be handled like plain 'is' or 'ds' because the include different fields
+# (e.g., 'sugid', presumably, suggestion id.)
 dispatch = {
     'ae': null,
     'ue': null,

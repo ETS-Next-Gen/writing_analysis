@@ -25,6 +25,7 @@ function doc_id() {
     }
 }
 
+
 function this_is_a_google_doc() {
     /*
       Returns 'true' if we are in a Google Doc
@@ -40,20 +41,19 @@ function log_event(event_type, event) {
     event["title"] = google_docs_title();
     event["doc_id"] = doc_id();
     event['event'] = event_type;
-
+    console.log(event);
     chrome.runtime.sendMessage(event);
 }
 
-
+//Data structure specifying the events we want to capture from the browser.
 EVENT_LIST = {
     "keystroke": {
 	"events": [
 	    "keypress", "keydown", "keyup"
 	],
 	"properties": [
-	    'altKey', 'charCode', 'code', 'ctrlKey', 'isComposing', 'key', 'keyCode',
-	    'location', 'metaKey', 'repeat', 'shiftKey', 'which', 'isTrusted',
-	    'timeStamp', 'type'],
+	    'altKey', 'buttons', 'charCode', 'code', 'ctrlKey', 'isComposing', 'key', 'keyCode',
+	    'location', 'metaKey', 'repeat', 'shiftKey', 'which', 'isTrusted', 'target', 'timeStamp', 'type'],
 	"target": "document"
     },
     "mouseclick": {
@@ -68,23 +68,67 @@ EVENT_LIST = {
 	    "screenX", "screenY",
 	    "movementX", "movementY",
 	    'altKey', 'ctrlKey',
-	    'metaKey', 'shiftKey', 'which', 'isTrusted',
+	    'metaKey', 'shiftKey', 
+	    'which', 'isTrusted',
 	    'timeStamp', 'type',
-	    'target.id',
-	    'target.innerText',
-	    'target.localName'
+	    'target.id', 'target.className',
+	    'target.innerText', 'target.nodeType','target.localName',
+	    'target.parentNode.id', 'target.parentNode.className',
+	    'target.parentNode.nodeType', 'target.parentNode.localName'
 	],
 	"target": "document"
     },
     "attention": {
-	"events": ["visibilitychange", "focusin", "focusout"],
+       "events": ["focusin", "focusout"],
 	// Not all of these are required for all events...
-	"properties": ['target', 'bubbles', 'cancelable', 'isTrusted', 'timeStamp', 'type'],
+	"properties": ['bubbles', 'cancelable', 
+	'isTrusted', 'timeStamp', 'type',
+	'target.className', 'target.id', 'target.innertext', 'target.nodeType', 'target.localName',
+	'target.parentNode.className', 'target.parentNode.id', 'target.parentNode.innerText', 'target.parentNode.nodeType', 'target.parentNode.localName'
+	],
 	"target": "window"
+    },
+    "visibility": {
+        "events": ["visibilitychange"],
+        "properties": ['target', 'bubbles', 'cancelable', 'isTrusted', 'timeStamp', 'type'],
+        "target": "document"
+    },
+    "save": {
+        "events": ["google_docs_save"],
+        "properties": [
+             "doc_id", "bundles", 
+             "event", "timestamp"
+        ],      
+        "target": "window"
+    },
+    "load": {
+        "events": ["document_loaded"],
+        "properties": [
+              "doc_id", "event",
+              "history", "title",
+              "timestamp"
+        ],
+        "target": "window"
+    },
+    "readystate": {
+        "events": ["readystatechange"],
+        "properties": [
+              "doc_id", "event",
+              "target", "timestamp", "type"
+        ],
+        "target": "window"
+    },
+    "pageshow": {
+        "events": ["pageshow"],
+        "properties": ['target', 'bubbles', 'cancelable', 'isTrusted', 'timeStamp', 'type'],
+        "target": "window"
     }
 };
 
-function generic_eventlistener(event_type, event) {
+function generic_eventlistener(event_type, frameindex, event) {
+    /*
+       This function captures any events specified in EVENT_LIST and passes them to the server.
+    */
     return function(event) {
 	/*
 	  Listen for events, and pass them back to the background page.
@@ -99,28 +143,233 @@ function generic_eventlistener(event_type, event) {
 		keystroke_data[properties[property]] = treeget(event, properties[property]);
 	    }
 	}
-	event_data[event_type] = keystroke_data;
-	log_event(event_type, event_data);
+        if (frameindex===undefined) {
+            frameindex='0';
+        }
+        //console.log(frameindex, event);
+
+        event_data[event_type] = keystroke_data;
+        event_data['frameindex']=frameindex;
+        log_event(event_type, event_data);
     }
 }
 
-// We want to listen to events in all iFrames, as well as the main content document.
+// Set up to observe changes in the document, not just events.
+var editor = document.querySelector('.kix-appview-editor');
+
+//Data structure where we store information about which events to log how.
+//The categories insert, delete, input, clear, replace are hard coded into the
+//function that sets up the MutationObserver. Once we know that, we know
+//what information in the context will tell us whether to log a change.
+//We start by checking classNames, for the added/removed node and the target.
+//That gives us the right list to use for pattern matching. The format lists
+//the first node matched in the rule as the key, and if a second node is needed,
+//that's the first item in the associated list. The second item in the list
+//indicates what to label the resulting event. The third item in the list
+//identifies the context within which the change happens, if not the empty string.
+//The innerText of this context will be recorded to track the effect of the edits
+//on the actual text -- this matters most for comments/suggestions, since the content
+//of the relevant plugin tells us what comments are actually in the document.
+var mutationsObserved = {
+        "insert": {
+             "docos-docoview-resolve-button-visible": ["docos-stream-view", "add-comment","kix-discussion-plugin"],
+             "docos-replyview-comment": ["docos-anchoreddocoview-content","add-reply","kix-discussion-plugin"],
+             "kix-spell-bubble": ["kix-appview-editor","view-spelling-suggestion",'']
+        },
+        "delete": {
+            "docos-replyview-suggest": ["docos-docoview-rootreply", "resolve-suggestion","kix-discussion-plugin"],
+            "docos-replyview-first": ["docos-docoview-rootreply", "delete-comment","kix-discussion-plugin"],        
+            "docos-replyview-comment": ["docos-docoview-replycontainer", "delete-reply","kix-discussion-plugin"]
+        },
+        "input": {
+            "docos-input-textarea": [null, "type-input",''],
+        },
+        "clear": {
+            "docos-input-textarea": [null, "clear-input",''],       
+        },
+        "replace": {
+            "docos-replyview-static": [null, "edit-comment","kix-discussion-plugin"],
+        },       
+        "suggest": {
+            "docos-replyview-static": [null, "add-suggestion","kix-discussion-plugin"],
+        },
+        "other": {
+             "kix-spell-bubble": [null,"view-spelling-suggestion",'']
+        }
+    } 
+
+function classifyModification(mutation) {
+/*
+    Determine what kind of change is being made. We will use this information
+    to access the correct list of event triggers from the mutationsObserved variable.
+*/
+    if (mutation.addedNodes.length > 0 && mutation.removedNodes.length == 0) {
+        return "insert";
+    }            
+    else if (mutation.addedNodes.length == 0 && mutation.removedNodes.length > 0) {
+         if (mutation.removedNodes[0].nodeType == Node.TEXT_NODE) {
+             return "clear";
+         }
+         else {
+           return "delete";
+         }
+    }
+    else if (mutation.addedNodes.length > 0 && mutation.removedNodes.length > 0 &&
+            mutation.removedNodes[0].nodeType == Node.TEXT_NODE &&
+            mutation.addedNodes[0].nodeType == Node.TEXT_NODE
+    ) {
+         return "replace";
+    }
+    else if (mutation.type=='characterData') {
+        return "input";
+    } 
+    else if (mutation.addedNodes.length > 0 && mutation.removedNodes.length > 0 ) {
+        return "suggest";
+    }
+    else {
+        return "other";
+    }
+}
+
+function stringCheck(myVar) {
+/*
+    Utility function to check whether a variable is a string.
+    We need that because some classes in Google docs graphics are not strings.
+*/
+    if (typeof myVar === 'string' || myVar instanceof String) {
+        return true;
+    } else {
+        return false;
+    }
+}
+
+function findAncestor (el, cls) {
+    while ((el = el.parentNode) && el.className.indexOf(cls) < 0);
+    return el;
+}
+
+function prepareMutationObserver(mutationsObserved) {
+    /*
+        Set up a MutationObserver that will use the mutationObserved dictionary
+        to tell it which changes to log and what label to log it as.
+    */
+    var observer = new MutationObserver(function (mutations) {
+        mutations.forEach(function (mutation) {
+
+          entry = {}
+          entry['event_type'] = 'mutation';
+
+          //This list guarantees that we'll have the information we need to understand what happened
+          //in a change event.
+  	  properties = ['type', 'addedNodes.length', 'removedNodes.length', 'target.className', 'target.parentNode.id', 'target.parentNode.className', 'addedNodes[0].innerText', 'addedNodes[0].data', 'addedNodes[0].id', 'addedNodes[0].className', 'addedNodes[0].nodeType', 'removedNodes[0].innerText', 'removedNodes[0].data', 'removedNodes[0].id', 'removedNodes[0].className', 'removedNodes[0].nodeType', 'target.data','target.innertext'];
+  	  
+          //populate the mutation_data variable and set the timestamp
+	  var mutation_data = {};
+	  for (var property in properties) {
+	      const prop = treeget(mutation, properties[property]);
+	      if(prop !== null) {
+	          label = properties[property].replace('[','');
+	          label = label.replace(']','');
+	          label = label.replaceAll('.','');
+		  mutation_data[label] = treeget(mutation, properties[property]);
+	      }
+	  }
+          entry['change'] = mutation_data;
+          entry['ts'] = Date.now();
+
+          //uncomment this to observe all mutations in the console log.
+          //console.log(mutation);
+
+          //apply the rule engine defined by mutationsObserved to record watched events.
+          category = classifyModification(mutation);
+          entry['event_type']=category;
+          actions = mutationsObserved[category];
+          for (var targetClass in actions) {
+              if (category=='insert') {
+                     if (stringCheck(entry.change.addedNodes0className) 
+                        && entry.change.addedNodes0className.indexOf(targetClass)>=0
+                        && entry.change.targetclassName.indexOf(actions[targetClass][0])>=0
+                     ) {
+                        if (loading) {
+                            entry['type'] = "loading: " + actions[targetClass][1];
+                        } else {
+                            entry['type'] = actions[targetClass][1];
+                        }
+                        if (actions[targetClass][2]!='') {
+                            entry['context_content'] = findAncestor(mutation.target,actions[targetClass][2]).innerText;
+                        }
+                        log_event(mutation.type,entry);
+                        break;
+                     } 
+              }
+              else if (category=='delete') { 
+                 if (stringCheck(entry.change.removedNodes0className) 
+                     && entry.change.removedNodes0className.indexOf(targetClass)>=0
+                     && entry.change.targetclassName.indexOf(actions[targetClass][0])>=0
+                 ) {
+                       entry['type'] = actions[targetClass][1];
+                       if (actions[targetClass][2]!='') {
+                           entry['context_content'] = findAncestor(mutation.target,actions[targetClass][2]).innerText;
+                       }
+                       log_event(mutation.type,entry);
+                       break;
+                 } 
+             }
+             else if (stringCheck(entry.change.targetparentNodeclassName) 
+                     && entry.change.targetparentNodeclassName.indexOf(targetClass)>=0
+                 ) {
+                       entry['type'] = actions[targetClass][1];
+                       if (actions[targetClass][2]!='') {
+                           entry['context_content'] = findAncestor(mutation.target,actions[targetClass][2]).innerText;
+                       }
+                       log_event(mutation.type,entry);
+                       break;
+                   }
+              }
+        });
+    });
+    return observer;
+}
+
+//Set mutation observer options -- we don't want attribute changes, but others we do ...
+var options = {
+    attributes: false,
+    childList: true,
+    characterData: true,
+    subtree: true  
+};
+
+//OK, now create the MutationObserver and start running it on the document.
+observer = prepareMutationObserver(mutationsObserved)
+observer.observe(editor, options);
+
+//Now initialize the event listeners.
+
+//We want to listen to events in all iFrames, as well as the main content document.
 var frames = Array.from(document.getElementsByTagName("iframe"));
+
 // We should really make a list of documents instead of a fake iframe....
 frames.push({'contentDocument': document})
 
+var s = document.createElement('script');
+s.src = chrome.runtime.getURL('pageinfo.js');
+
+//Add an event listener to each iframe in the iframes under frames.
 for(var event_type in EVENT_LIST) {
+
     for(var event_idx in EVENT_LIST[event_type]['events']) {
 	js_event = EVENT_LIST[event_type]['events'][event_idx];
 	target = EVENT_LIST[event_type]['target']
 	if(target === 'document') {
+ 
 	    for(var iframe in frames){
 		if(frames[iframe].contentDocument) {
-		    frames[iframe].contentDocument.addEventListener(js_event, generic_eventlistener(event_type));
-		}
+                    console.log(iframe)
+                    frames[iframe].contentDocument.addEventListener(js_event, generic_eventlistener(event_type,iframe));
+              }               
 	    }
 	} else if (target === 'window') {
-	    window.addEventListener(js_event, generic_eventlistener(event_type));
+            window.addEventListener(js_event, generic_eventlistener(event_type));
 	}
     }
 }
@@ -255,6 +504,9 @@ function google_docs_version_history() {
     });
 }
 
+//When the script is loaded, we assume the page is still being loaded
+var loading = 1;
+
 function writing_onload() {
     if(this_is_a_google_doc()) {
 	log_event("document_loaded", {
@@ -262,6 +514,8 @@ function writing_onload() {
 	})
 	google_docs_version_history();
     }
+    // So once we hit a load event, we can assume we're not loading any more.
+    loading = 0;
 }
 
-window.addEventListener("load", writing_onload);
+window.addEventListener("load", writing_onload); 

@@ -17,7 +17,7 @@
     },
 
     "content_scripts": [ {
-	"matches": ["*://docs.google.com/*"],
+        "matches": ["*://docs.google.com/*"],
 	"js": ["3rdparty/sha256.js", "writing_common.js", "writing.js"]
     }],
     "background": {
@@ -29,9 +29,12 @@
 	"identity.email",
 	"*://docs.google.com/*",
 	"*://mail.google.com/*",
-	"clipboardRead",
-	"storage"
-    ],
+        "clipboardRead",
+        "storage",
+        "activeTab",
+        "tabs",
+        "declarativeContent"
+   ],
     "icons": {
 	"48": "icons/lousy-fountain-pen-48.png"
     },
